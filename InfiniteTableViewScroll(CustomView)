@@ -1,0 +1,100 @@
+https://github.com/pronebird/UIScrollView-InfiniteScroll 
+Add Package => enter upper link in search  >> Add Package
+// View Controller
+private let table: UITableView = {
+	let table = UITableView()
+	table.register(UITableViewCell.self, 
+		forCellResueIdentifier: "cell")
+	table.translateAutoresizingMaskIntoConstraints = false	
+	return table
+}
+
+let service = ApiCaller.shared
+
+
+override func viewDidLoad(){
+	super.viewDidLoad()
+	view.addSubView(table)
+	table.delegate = self
+	table.datasource = self
+	
+	NSLayoutConstarint.activate([
+		table.topAnchor.constarint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+		table.leftAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leftAnchor),
+		table.rightAnchor.constraint(equalTo: view.safeAreaLayoutGuide.rightAnchor),
+		table.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+	])
+	
+	service.fetchData{ [weak self] _ in
+		DispatchQueue.main.async{
+			self?.table.reloadData()
+		}
+	}
+	
+	table.infiniteScrollDirection = .vertical
+	table.addInfiniteScroll { [weak self] table in
+		// fetch more data
+		self?.service.loadMorePosts { [weak self ] moreData in
+			DispatchQueue.main.asyn{
+				let startIndex = Int(moreData.fist!.components(seperatedBy: "").last!)!
+				let start = startIndex - 1
+				let end = startIndex + moreData.count
+				let indices =  Array(start..<end).compactMap({ return IndexPath(row: $0, section: 0 })
+				self?.table.insertRows(at: indices, with: .automatic)
+				self?.table.reloadData()
+				// finish
+				table.finishInfiniteScroll()
+			}
+		}
+		
+	}
+	
+}
+
+extension ViewController: UITableViewDelegate, UITableViewDataSource{
+	// numberofRowsInSection
+	return service.models.count;
+	
+	// cellForRowAt
+	let model = service.models[indexPath.row]
+	let cell = table.dequeReusableCell(withIdentifier: "cell", for: indexPath)
+	cell.textLabel?.text = model
+	return cell
+}
+
+/////////////////////////////////////////////// end of view controller
+
+
+// API Call
+final class ApiCaller{
+	static let shared = ApiCaller()
+	private init(){}
+	
+	public private(set) var models = [String]() // get permission public and setting data private
+	
+	func fetchData(completion: @escaping ([String]) -> Void){ [weak self] in 
+		DispatchQueue.global().asyncAfter(deadline: .now()+2, execute: {
+			self?models = Array(1..20).map { "Book \($0)" }
+			completion(self?.models ?? [] )
+		})
+	}
+	
+	func loadMorePosts(completion: @escaping ([String]) -> Void){ [weak self] in 
+		DispatchQueue.global().asyncAfter(deadline: .now()+2, execute: {
+			guard let strongSelf = self, 
+			let last = strongSelf.models.last
+			 else { return } 
+			let number = Int(last.components(seperatedBy: " ").last!))!
+			let start = number + 1
+			let end = number + 20
+			
+			let newData = Array(start..end).map { "Book \($0)" }
+
+			completion(newData ?? [] )
+		})
+	}
+}
+
+/////////////////////////////////////////////////// end of apicaller 
+- fetching 20 data first
+- when score end -> load more and append

@@ -1,0 +1,79 @@
+struct Group{
+	let title : String
+	let animals : [String]
+}
+
+
+
+// View Controller 
+
+private let animals : [String: [String]] = [
+	"A" : ["Ant Eater"],
+	"B" : ["Bear", "Bird"],
+	"C" : ["Cat"],
+	"F" : ["Fish"],
+	"T" : ["Tiger", "Turtle"]
+]
+
+private let alphabet = "abcdefghijklmnopqrstuvwxyz"
+
+private let tableView : UITableView = {
+	let table = UITableView()
+	table.register(UITableViewCell.self, forCellResueIdentifier: "cell")
+	return table
+}()
+var models = [Group]()
+
+// viewdidload
+setupData()
+view.addSubView(tableView)
+tableView.delegate = self
+tableView.dataSource = self
+
+func setUpData(){
+	for(key,value) in animals {
+		models.append(.init(title: key, animals : value))
+	}
+	models = models.sorted(by: { $0.title < $1.title })
+}
+
+override func viewDidLayoutSubViews(){
+	tableView.frame = CGRect(
+		x: 0,
+		y: view.safeAreaInsets.top,
+		width: view.frame.size.width,
+		height: view.frame.size.height - view.safeAreaInsets.top
+	)
+}
+
+extenstion ViewController : UITableViewDataSource, UITableViewDelegateFlowLayout {
+	// number of Sections
+	return models.count
+	
+	numberOfRowsInSection
+	// return models[section].animals.count
+	
+	cellForRowAt
+	let cell = tableView.dequeReusableCell(withIdentifier: "cell", for: indexPath)
+	cell.textLabel?.text = models[indexPath.section].animals[indexPath.row]
+	return cell
+	
+	titleForHeaderInSection
+	// return models[section].title
+	
+	// For left side ( a.. to .. z)
+	sectionIndexTiles
+	return models.compatMap{ $0.title } // this will only show included alphabet
+	// but if we want to show A - to Z like Contact App
+	return Array(alphabet.uppercased()).compactMap { "\($0)" }
+	
+	// this is scroll for specific index 
+	sectionForSectionIndexTile
+	guard let targetIndex = models.firstIndex(where: {
+		$0.title == title
+	}) else{
+		return 0
+	}
+	return targetIndex
+	
+}
