@@ -1,0 +1,41 @@
+// ViewController
+tableView.register(FieldTableViewCell.nib(), forCellReuseIdentifier: FieldTableViewCell.identifier)
+
+let fieldCell = tableView.dequeueReusableCell(withIdentifier: FieldTableViewCell.identifier, for: indexPath) as! FieldTableViewCell
+return fieldCell
+
+let cell = tableView.dequeReusableCell(withIdentifier: "cell", for: indexPath)
+cell.textLable?.text = "Hello World"
+let mySwitch = UISwitch()
+mySwitch.addTarget(self, action: #selector(didChangeSwitch(_:)), for: .valueChanged)
+cell.accessoryView = mySwitch
+return cell
+
+
+
+///////////////////////////////////////////////////////// TableViewCell + Nib File
+In nib file need to set up identifier 
+
+class FieldTableViewCell : UITableViewCell, UITextFieldDelegate{
+	static let identifier = "FieldTableVeiwCell"
+	static func nib() -> UINib{
+		return UINib(nibName: "FieldTableViewCell",
+			   	bundle: nil)
+	}
+	
+	@IBOutLet var field: UITextField!
+	
+	@override func awakeFromNib(){
+		super.awakeFromNib()
+		field.placeholder = "Enter something...."
+		field.delegate = self
+	}
+	
+	func textFieldShouldReturn(_ textField: UITextField) -> Bool{
+		textField.resignFirstResponder()
+		print("\(textField.text ?? "")")
+		retrun true
+	}
+	
+	// override setSelected
+}

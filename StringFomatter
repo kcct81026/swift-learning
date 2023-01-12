@@ -1,0 +1,21 @@
+let value: Double = 1000.65656565
+let string = "Amount: \(value)"
+
+let fomatter = NumberFormatter()
+fomatter.numberStyle = .currency
+//fomatter.numberStyle = .currency
+fomatter.maximumFractionDigits = 2
+
+let numberString = fomatter.string(from: NSNumber(value: value)) ?? "-"
+print("Amung: \(numberString)) // Amount: $1,000.32
+
+let number2 : Float = 48.515455
+let string2 = String(format: "Measurement: %.2f", number2)
+print(string2) // Measuerment: 48.21
+
+let value2 = 0.5 // 50%
+let fomatter2 = NumberFomatter()
+fomatter2.numberStyle = .percent
+formatter2.maximumFractionDigits = 2
+let percent = formatter2.string(from: NSNumber(value: value2)) ?? "-"
+print("WorkOut goals : \(percent)")

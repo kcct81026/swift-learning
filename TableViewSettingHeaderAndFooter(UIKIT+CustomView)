@@ -1,0 +1,56 @@
+
+//ViewController
+connect with IBOutlet
+//StoryBoard
+select tableView => click on right pannel (downarrow) and set prototype cell into => 1 then we can see table view cell in under table view
+then click on table view cell and set identifier to "cell"
+
+
+//ViewController
+tableView.delegate = self
+tableView.dataSource = self
+// adding header and footer
+let header = UIView(frame: CGRect(x:0, y:0, width: view.frame.size.width, height:300)
+let footer = UIView(frame: CGRect(x:0, y:0, width: view.frame.size.width, height:300)
+header.backgroundColor = .orange
+footer.backgroundColor = .green
+
+let label = UILabel(frame: header.bounds)
+label.text = "Hello World"
+label.textAlignment  = .center
+header.addSubView(label)
+
+tableView.tableHeaderView = header
+tableView.tableFooterView = footer
+
+let data = [
+ ["apples", "oranges", "grapes" ] ,
+ ["one","two","three","four","five"],
+ ["last one"]
+]
+
+// we don't need to register in cell it is already set in storyboard
+
+extension ViewController: UITableViewDelegate{
+
+// numberOfRowsInSection
+return data[section].count 
+
+//( default 1 section)
+// heightForHeaderInSection ( Setting some space in header section)
+return 20.0
+
+// nuberOfSections
+return data.count
+
+// cellForRowAt
+let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
+cell.textLabel?.text = data[indexPath.section][indexPath.row]
+cell.backgroundColor = .red
+
+return cell
+
+}
+
+// didSelectRowAt
+tableView.deselectRow(at: indexPath, animated: true)
