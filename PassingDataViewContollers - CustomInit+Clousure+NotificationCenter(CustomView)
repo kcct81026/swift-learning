@@ -1,0 +1,276 @@
+/*
+- Custom init
+- Completion handler (closure)
+- Notification center post
+*/
+/// Go to story board -> embed in TabBar and then create two more view controllers
+/// drag tabbarcontroller to each controller and (set up relationship segue => view controllers)
+/// and then select the viewcontoller from storyboard -> open right pannel and set up controller class each
+
+class ViewController: UIViewController {
+
+	let tableView: UITableView = {
+		let table = UITableView()
+		table.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
+		
+		return table
+	}()
+	
+	private let data = [
+		["apple", "sony", "google", "microsoft",
+		["apples", "oranges", "grapes" ] ,
+		["one","two","three","four","five"],
+
+	]
+	
+	var observer: NSObjectProtocol?
+
+	@override func viewDidLoad(){
+		super.viewDidLoad()
+		
+		view.addSubView(tableView)
+		tableView.delegate = self
+		tableView.dataSource = self
+		tableView.frame = view.bounds
+		
+		observer = NoficationCenter.default.addobserver(
+			forName: Notification.Name("ourCustom"),
+			object: nil,
+			queue: .main,
+			using: { notification in 
+			
+			guard let object = notification.object as? [String: UIColor] else{
+				return 
+			}
+			
+			guard let color = object["color"] else{
+				return 
+			}
+			
+			self.view.backgroundColor = color
+			self.tableView.isHidden = true
+		}
+	}
+	
+	
+}
+
+extension ViewController: UITableViewDelegate, UITableViewDataSource {
+	//numberOfRowsInSection
+	return data[section].count
+	
+	//numberOfSections
+	return data.count
+	
+	//cellForRowAt
+	let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
+	cell.textLabel?.text = data[indexPath.section][indexPath.row]
+	return cell
+	
+	//didSelectRowAt
+	tableView.deselectRow(at: indexPath, animated: true)
+	let items = data[indexPath.section]
+	let vc = SecondCustomViewController(selectedItem: item[indexPath.row], relatedItems: items)
+	//present(vc, animated: true) // title will not showing up
+	present(UINavigationController(rootViewController: vc), animated: true)
+}
+
+class SecondCustomViewController: UIViewController{
+
+	private let selectedItem: String
+	private let relatedItems: [String]
+	
+	init(selectedItem: String, relatedItems: [String] ){
+		self.selectedItem = selectedItem
+		self.relatedItems = relatedItems
+		super.init(nibName:nil, bundle:nil)
+	}
+	
+	required init?(coder: NSCoder){
+		fatalerror("init error")
+	}
+	
+	var observer: NSObjectProtocol?
+	
+	override func viewDidLoad(){
+		super.viewDidLoad()
+		
+		view.backgroundColor = .systemGreen
+		title = selectedItem.uppercased()
+		
+		let label = UILable(frame: view.bounds)
+		view.addSubView(label)
+		label.textAlignment = .center
+		label.numberOfLines = -1
+		for item in relatedItems{
+			label.text = (label.text ?? "") + " " + item 
+		}
+		
+		
+		observer = NoficationCenter.default.addobserver(
+			forName: Notification.Name("ourCustom"),
+			object: nil,
+			queue: .main,
+			using: { notification in 
+			
+			guard let object = notification.object as? [String: UIColor] else{
+				return 
+			}
+			
+			guard let color = object["color"] else{
+				return 
+			}
+			
+			self.view.backgroundColor = color
+
+		}
+		
+	}
+}
+
+//////////////////////////////////////////////////////////////
+
+class SecondViewController: UIViewController{
+
+	let label : UILabel = {
+		let label = UILabel()
+		label.textAlignment = .center
+		label.text = "Name: - "
+		return label
+	}()
+
+	
+	override func viewDidLoad(){
+		super.viewDidLoad()
+		
+		view.backgroundColor = .blue
+		view.addSubView(label)
+		label.frame = CGRect(x:0, y: 50, width: view.frame.size.width, height: 100)
+		
+		let button = UIButton(frame: CGRect(x:0, y:0, width: 200, height: 50))
+		view.adSubView(button)
+		button.center = view.center
+		button.setTitle("Set Name" , for: .normal)
+		button.setTitle(.white, for: .normal)
+		button.addTarget(self, action: #selector(didTapButton), for: .touchUpInside)
+		
+		
+	}
+	
+	@objc private func didTapButton(){
+		let textEntry = TextEntryViewController()
+		textEntry.completion = { [weak self] text in
+			Dispatch.main.async {
+				self?.label.text = text	
+			}
+		}
+		let vc = UINavigationController(rootVeiwController: textEntry)
+		present(vc, animated: true)
+	}
+}
+
+class TextEntryViewController: UIViewController{
+
+	private let field: UITextField = {
+		let field = UITextField()
+		field.placeholder = "Enter Name...."
+		field.backgroundColor = .white
+		field.textColor = .black
+		return field
+	}()
+	
+	public var completion: ((String?) -> Void)?
+
+	override func viewDidLoad(){
+		super.viewDidLoad()
+		
+		view.backgroundColor = .lightGray
+		title = "Enter Name"
+		navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Done", style: .done, target: self, action: #selector(didTapDoneButton))
+		
+		view.addSubView(field)
+		field.frame = CGRect(x:20, y:100, width: view.frame.size.width-40, height: 55)
+		
+		field.becomeFirstResponder()
+		
+	}
+	
+	@objct private func didTapDoneButton(){
+		completion?(field.text)
+		dismiss(animate: true, completion: nil)
+	}
+}
+
+/////////////////////////////////////////////////////////
+class ThirdViewController: UIViewController{
+
+	override func viewDidLoad(){
+		super.viewDidLoad()
+		
+		view.backgroundColor = .yellow
+		
+		let button = UIButton(frame: CGRect(
+			x: 0, 
+			y: 0,
+			width: 200,
+			height: 50
+		))
+		
+		view.addSubView(button)
+		button.center = view.center
+		button.backgroundColor = .blue
+		button.setTitle("Fire Event" , for: .normal)
+		button.setTitleColor(.white, for: .normal)
+		button.addTarget(self, action: #selector(didTapButton), for: .touchUpInside)
+		
+		
+	}
+	
+	@objc private func didTapButton(){
+		NotificationCenter.default.post(
+			name: Notification.Name("ourCustom"),
+			object: ["color" : UIColor.red ]
+		)
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
