@@ -1,0 +1,38 @@
+struct ToDoListItem: Identifiable{
+	var id = UUID()
+	var action: String
+}
+
+class ToDoList: ObservableObject{
+	@Published var items: [ToDoListItem]() = []
+
+}
+
+struct ContentView: View{
+
+	@ObservedObject var viewModel: ToDoList = ToDoList()
+
+	var body: some View{
+		NavigationView{
+			Vstack{
+				List(viewModel.items){ item in 
+					Text(item.action)
+				}
+			}
+			.navigationTitle("To Do List")
+			.navigationBarItems(trailing: 
+				Button( action: {
+					self.viewModel.items = [
+						ToDoListItem(action: "Go running"),
+						ToDoListItem(action: "Do chores"),
+						ToDoListItem(action: "Need Study"),
+						ToDoListItem(action: "Nap 15 minutes"),
+					]
+			}, label: {
+				Text("Refresh")
+			}))
+		}
+	}
+}
+
+

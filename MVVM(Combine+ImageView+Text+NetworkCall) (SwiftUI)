@@ -1,0 +1,331 @@
+//// Add image package
+// link 
+//https://github.com/dmytro-anokhin/url-image
+// file -> Swift packages -> add packgage dependicies
+
+///////////////////////////////////////////////////////////// Content View
+import SwiftUI
+import Combine
+
+struct ContentView: View {
+    
+    @Environment(\.openURL) var openURL
+    @StateObject var viewModel: ArticleViewModelImpl = ArticleViewModelImpl(service: ArticleServiceImpl())
+    
+    var body: some View {
+        
+        Group {
+            
+            switch viewModel.state {
+            case .loading:
+                ProgressView()
+            case .failed(let error):
+                ErrorView(error: error) {
+                    self.viewModel.getArticles()
+                }
+            case .success(let content):
+                NavigationView {
+                    List(content) { article in
+                        ArticleView(article: article)
+                            .onTapGesture {
+                                load(url: article.url)
+                            }
+                    }
+                    .navigationBarTitle("News")
+                }
+            }
+        }
+        .onAppear {
+            self.viewModel.getArticles()
+        }
+    }
+    
+    func load(url: String?) {
+        guard let url = url,
+            let linkUrl = URL(string: url) else {
+            return
+        }
+        openURL(linkUrl)
+    }
+}
+
+///////////////////////////////////////////////////////////// View
+struct ArticleView: View {
+    
+    let article: Article
+    
+    var body: some View {
+        HStack {
+            // TODO: Add image view
+            if let image = article.image,
+               let url = URL(string: image){
+                
+                URLImage(url, identifier: url.absoluteString) {
+                    // This view is displayed before download starts
+                    EmptyView()
+                } inProgress: { progress in
+                    // Display progress
+                   ProgressView()
+                } failure: { error, retry in
+                    // Display error and retry button
+                    Image(systemName: "photo.fill")
+                        .foregroundColor(.white)
+                        .background(Color.gray)
+                        .frame(width: 100, height: 100)
+                        .cornerRadius(10)
+                } content: { image in
+                    // Downloaded image
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 100, height: 100)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .environment(\.urlImageOptions,
+                              .init(fetchPolicy: .returnStoreElseLoad(downloadDelay: nil)))
+
+            } else {
+                Image(systemName: "photo.fill")
+                    .foregroundColor(.white)
+                    .background(Color.gray)
+                    .frame(width: 100, height: 100)
+                    .cornerRadius(10)
+            }
+
+            
+            VStack(alignment: .leading, spacing: 4) {
+                
+                Text(article.title ?? "")
+                    .foregroundColor(.black)
+                    .font(.system(size: 18, weight: .semibold))
+                Text(article.source ?? "")
+                    .foregroundColor(.gray)
+                    .font(.system(size: 12, weight: .regular))
+            }
+        }
+    }
+}
+
+
+typealias EmptyStateActionHandler = () -> Void
+
+struct ErrorView: View {
+    
+    private let handler: EmptyStateActionHandler
+    private var error: Error
+    
+    internal init(
+        error: Error,
+        handler: @escaping EmptyStateActionHandler) {
+        self.error = error
+        self.handler = handler
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.icloud.fill")
+                .foregroundColor(.gray)
+                .font(.system(size: 50, weight: .heavy))
+            Text("Ooops...")
+                .font(.system(size: 30, weight: .heavy))
+            Text(error.localizedDescription)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+                .padding(.bottom, 10)
+            Button("Retry") {
+                handler()
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 10)
+            .font(.system(size: 20, weight: .bold))
+            .background(Color.blue)
+            .foregroundColor(.white)
+            .cornerRadius(10)
+        }
+    }
+}
+
+
+
+///////////////////////////////////////////////////////////// View Model
+import Foundation
+import Combine
+
+protocol ArticleViewModel {
+    func getArticles()
+}
+
+enum ResultState {
+    case loading
+    case failed(error: Error)
+    case success(content: [Article])
+}
+
+
+class ArticleViewModelImpl: ObservableObject, ArticleViewModel {
+    
+    private let service: ArticleService
+
+    private(set) var articles = [Article]()
+    @Published private(set) var state: ResultState = .loading
+
+    private var cancellables = Set<AnyCancellable>()
+
+    init(service: ArticleService) {
+        self.service = service
+    }
+    
+    func getArticles() {
+        
+        self.state = .loading
+        
+        let cancellable = self.service
+            .request(from: .getNews)
+            .sink { (res) in
+                switch res {
+                case .failure(let error):
+                    self.state = .failed(error: error)
+                case .finished:
+                    self.state = .success(content: self.articles)
+                }
+            } receiveValue: { res in
+                self.articles = res.articles
+            }
+        self.cancellables.insert(cancellable)
+    }
+}
+
+
+
+///////////////////////////////////////////////////////////// Service ( like network agent)
+import Foundation
+import Combine
+
+protocol ArticleService {
+     func request(from endpoint: ArticleAPI) -> AnyPublisher<ArticleResponse, APIError>
+}
+
+struct ArticleServiceImpl: ArticleService {
+
+    func request(from endpoint: ArticleAPI) -> AnyPublisher<ArticleResponse, APIError> {
+        
+        let jsonDecoder = JSONDecoder()
+        jsonDecoder.dateDecodingStrategy = .iso8601
+        
+        return URLSession.shared
+            .dataTaskPublisher(for: endpoint.urlRequest)
+            .receive(on: DispatchQueue.main)
+            .mapError { _ in .unknown }
+            .flatMap { data, response -> AnyPublisher<ArticleResponse, APIError> in
+
+                guard let response = response as? HTTPURLResponse else {
+                    return Fail(error: .unknown)
+                            .eraseToAnyPublisher()
+                }
+
+                if (200...299).contains(response.statusCode) {
+                    return Just(data)
+                        .decode(type: ArticleResponse.self, decoder: jsonDecoder)
+                        .mapError {_ in .decodingError}
+                        .eraseToAnyPublisher()
+                } else {
+                    return Fail(error: .errorCode(response.statusCode))
+                            .eraseToAnyPublisher()
+                }
+            }.eraseToAnyPublisher()
+    }
+}
+
+
+///////////////////////////////////////////////////////////// Model
+
+struct ArticleResponse: Codable {
+    let articles: [Article]
+}
+
+struct Article: Codable, Identifiable {
+
+    let id: UUID = UUID()
+    var author: String?
+    var url: String?
+    var source: String?
+    var title: String?
+    var welcomeDescription: String?
+    var image: String?
+    var date: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case author, url, source, title, image, date
+        case welcomeDescription = "description"
+    }
+}
+
+extension Article {
+    
+    static var dummyData: Article {
+        .init(author: "Adam Edelman, Monica Alba, Frank Thorp V, Alex Moe",
+              url: "https://www.nbcnews.com/politics/donald-trump/trump-impeachment-trial-day-2-kicks-case-against-him-n1257246",
+              source: "NBC News",
+              title: "Never-seen-before security video of Capitol riot to open Trump impeachment trial Day 2 - NBC News",
+              welcomeDescription: "Dems to open Day 2 trial arguments against Trump with 'never-seen-before\" riot footage",
+              image: "https://media2.s-nbcnews.com/j/newscms/2021_06/3448074/210205-impeachment-main-bar-cs-428p_fcaf4fdb04ac2ff3682a3783343f300b.nbcnews-fp-1200-630.jpg",
+              date: Date())
+    }
+}
+
+enum APIError: Error {
+    case decodingError
+    case errorCode(Int)
+    case unknown
+}
+
+extension APIError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .decodingError:
+            return "Failed to decode the error from the service"
+        case .errorCode(let code):
+            return "\(code) - Something went wrong"
+        case .unknown:
+            return "The error is unknown"
+        }
+    }
+}
+
+
+///////////////////////////////////////////////////////////// End Point
+protocol APIBuilder {
+    var urlRequest: URLRequest { get }
+    var baseUrl: URL { get }
+    var path: String { get }
+}
+
+enum ArticleAPI {
+    case getNews
+}
+
+extension ArticleAPI: APIBuilder {
+
+    var baseUrl: URL {
+        switch self {
+        case .getNews:
+            return URL(string: "https://api.lil.software")!
+        }
+    }
+    
+    var path: String {
+        switch self {
+        case .getNews:
+            return "/news"
+
+        }
+    }
+    
+    var urlRequest: URLRequest {
+        switch self {
+        case .getNews:           
+            return URLRequest(url: self.baseUrl.appendingPathComponent(self.path))
+        }
+    }
+}

@@ -1,0 +1,75 @@
+struct ContentView: View{
+	
+	@StateObject var viewModel = WeatherViewModel()
+
+	var body: some View{
+		NavigationView{
+			VStack{
+				Text(viewModel.timezone)
+					.font(system(size: 32))
+				Text(viewModel.temp)
+					.font(system(size: 44))
+				Text(viewModel.title)
+					.font(system(size: 24))
+				Text(viewModel.description)
+					.font(system(size: 24))
+
+			}
+			.navigationTitle("Weather MVVM")
+		}
+	}
+}
+
+
+///////////////////////////////////// ViewModel
+class WeatherViewModel: ObservableObject{
+	@Published var title: String = ""
+	@Published var descriptionText: String = ""
+	@Published var temp: String = ""
+	@Published var timezone: String = ""
+	
+	init(){
+		fetchWeather()
+	}
+	
+	func fetchWeather(){
+		guard let url = URL(string: "")
+		let task = URLSession.shared.dataTast(with: url){ [weak self] data, _, error in 
+			guard let data = data, error == nil else{
+				return 
+			}
+			// Convert to Model
+			do{
+				let model = try JSONDecoder().decode(WeatherModel.self, from: data)
+				DispatchQueue.main.async {
+					self.title = model.current.weather.first?.main ?? "No title"
+					self.description = model.current.weather.first?.description ?? "No description"
+					self.temp = "\(model.current.temp)"
+					self.timezone = model.timezeone
+				}
+			}
+			catch{
+				print("failed")
+			}
+			
+		}
+		task.resume()
+	}
+}
+
+
+//////////////////////////////////////////// Model
+struct WeatherModel: Codable{
+	let timezone: String
+	let current: CurrentWeather
+}
+
+struct CurrentWather: Codable{
+	let temp: Float
+	let weaher: [WeatherInfo]
+}
+
+struct WeatherInfo: Codable{
+	let main: String
+	let description: String
+}

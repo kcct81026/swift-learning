@@ -1,0 +1,276 @@
+//////////////////////////////////////////////////////////////// View
+struct AppetizerListView: View {
+
+	@StateObject private var viewModel = AppetizerListViewModel()
+    
+    var body: some View {
+        ZStack {
+            NavigationView {
+                List(viewModel.appetizers, id: \.id) { appetizer in
+                    AppetizerCell(appetizer: appetizer)
+                }
+                .navigationTitle("🍟 Appetizers")
+            }
+            .onAppear { viewModel.getAppetizers() }
+            
+            if viewModel.isLoading { LoadingView() }
+        }
+        
+        .alert(item: $viewModel.alertItem) { alertItem in
+            Alert(title: alertItem.title, message: alertItem.message, dismissButton: alertItem.dismissButton)
+        }
+    }
+    
+   
+}
+
+
+struct LoadingView: View {
+    
+    var body: some View {
+        ZStack {
+            Color(.systemBackground).edgesIgnoringSafeArea(.all)
+            
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                .scaleEffect(2)
+        }
+    }
+}
+
+
+struct AppetizerCell: View {
+    
+    let appetizer: Appetizer
+    
+    var body: some View {
+        HStack {
+            AppetizerRemoteImage(urlString: appetizer.imageURL)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 120, height: 90)
+                .cornerRadius(8)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(appetizer.name)
+                    .font(.title2)
+                    .fontWeight(.medium)
+                
+                Text("$\(appetizer.price, specifier: "%.2f")")
+                    .foregroundColor(.secondary)
+                    .fontWeight(.semibold)
+            }
+            .padding(.leading)
+        }
+    }
+}
+
+
+/////////////////////////////////////////////////////////////////// ViewModel
+final class AppetizerListViewModel: ObservableObject{
+	@Published var appetizers: [Appetizer] = []
+    	@Published var isLoading = false
+    	@Published var alertItem: AlertItem?
+
+	func getAppetizers() {
+		isLoading = true
+		
+		NetworkManager.shared.getAppetizers { [self] result in
+		    DispatchQueue.main.async {
+		        isLoading = false
+		        
+		        switch result {
+		        case .success(let appetizers):
+		            self.appetizers = appetizers
+		            
+		        case .failure(let error):
+		            switch error {
+		            case .invalidData:
+		                alertItem = AlertContext.invalidData
+		                
+		            case .invalidURL:
+		                alertItem = AlertContext.invalidURL
+		                
+		            case .invalidResponse:
+		                alertItem = AlertContext.invalidResponse
+		                
+		            case .unableToComplete:
+		                alertItem = AlertContext.unableToComplete
+		            }
+		        }
+		    }
+		}
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////// Model
+
+struct Appetizer: Identifiable, Decodable {
+    let id: Int
+    let name: String
+    let price: Double
+    let imageURL: String
+    let description: String
+    let calories: Int
+    let carbs: Int
+    let protein: Int
+}
+
+struct AppetizerResponse: Decodable {
+    let request: [Appetizer]
+}
+
+
+struct MockData {
+    
+    static let appetizers = [sampleAppetizer, sampleAppetizer, sampleAppetizer]
+    
+    static let sampleAppetizer = Appetizer(id: 0000002,
+                                           name: "Blackened Shrimp",
+                                           price: 6.99,
+                                           imageURL: "https://seanallen-course-backend.herokuapp.com/images/appetizers/blackened-shrimp.jpg",
+                                           description: "Seasoned shrimp from the depths of the Atlantic Ocean.",
+                                           calories: 450,
+                                           carbs: 3,
+                                           protein: 4)
+}
+
+///////////////////////////////////////////////////////////////// Utilities
+struct AlertItem: Identifiable {
+    var id = UUID()
+    var title: Text
+    var message: Text
+    var dismissButton: Alert.Button?
+}
+
+enum AlertContext {
+    
+    //MARK: - Network Errors
+    static let invalidURL       = AlertItem(title: Text("Server Error"),
+                                            message: Text("There is an error trying to reach the server. If this persists, please contact support."),
+                                            dismissButton: .default(Text("Ok")))
+    
+    static let unableToComplete = AlertItem(title: Text("Server Error"),
+                                            message: Text("Unable to complete your request at this time. Please check your internet connection."),
+                                            dismissButton: .default(Text("Ok")))
+    
+    static let invalidResponse  = AlertItem(title: Text("Server Error"),
+                                            message: Text("Invalid response from the server. Please try again or contact support."),
+                                            dismissButton: .default(Text("Ok")))
+    
+    static let invalidData      = AlertItem(title: Text("Server Error"),
+                                            message: Text("The data received from the server was invalid. Please try again or contact support."),
+                                            dismissButton: .default(Text("Ok")))
+}
+
+/// AppetizerRemoteImageView
+final class ImageLoader: ObservableObject {
+    
+    @Published var image: Image? = nil
+    
+    func load(fromURL url: String) {
+        NetworkManager.shared.downloadImage(from: url) { uiImage in
+            guard let uiImage = uiImage else { return }
+            DispatchQueue.main.async {
+                self.image = Image(uiImage: uiImage)
+            }
+        }
+    }
+}
+
+
+struct RemoteImage: View {
+    
+    var image: Image?
+    
+    var body: some View {
+        image?.resizable() ?? Image("food-placeholder").resizable()
+    }
+}
+
+
+struct AppetizerRemoteImage: View {
+    
+    @StateObject private var imageLoader = ImageLoader()
+    var urlString: String
+    
+    var body: some View {
+        RemoteImage(image: imageLoader.image)
+            .onAppear { imageLoader.load(fromURL: urlString) }
+    }
+}
+
+//// Network Manager
+class NetworkManager: NSObject {
+    
+    static let shared           = NetworkManager()
+    private let cache           = NSCache<NSString, UIImage>()
+    
+    static let baseURL          = "https://seanallen-course-backend.herokuapp.com/"
+    private let appetizerURL    = baseURL + "swiftui-fundamentals/appetizers"
+    
+    private override init() {}
+    
+    
+    func getAppetizers(completed: @escaping (Result<[Appetizer], APError>) -> Void) {
+        guard let url = URL(string: appetizerURL) else {
+            completed(.failure(.invalidURL))
+            return
+        }
+               
+        let task = URLSession.shared.dataTask(with: URLRequest(url: url)) { data, response, error in
+            
+            if let _ =  error {
+                completed(.failure(.unableToComplete))
+                return
+            }
+                        
+            guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
+                completed(.failure(.invalidResponse))
+                return
+            }
+            
+            guard let data = data else {
+                completed(.failure(.invalidData))
+                return
+            }
+            
+            do {
+                let decoder = JSONDecoder()
+                let decodedResponse = try decoder.decode(AppetizerResponse.self, from: data)
+                completed(.success(decodedResponse.request))
+            } catch {
+                completed(.failure(.invalidData))
+            }
+        }
+        
+        task.resume()
+    }
+    
+    
+    func downloadImage(from urlString: String, completed: @escaping (UIImage?) -> Void) {
+        
+        let cacheKey = NSString(string: urlString)
+        
+        if let image = cache.object(forKey: cacheKey) {
+            completed(image)
+            return
+        }
+        
+        guard let url = URL(string: urlString) else {
+            completed(nil)
+            return
+        }
+        
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data, let image = UIImage(data: data) else {
+                completed(nil)
+                return
+            }
+            
+            self.cache.setObject(image, forKey: cacheKey)
+            completed(image)
+        }
+        
+        task.resume()
+    }
+}

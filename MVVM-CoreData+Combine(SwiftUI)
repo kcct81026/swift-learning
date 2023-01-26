@@ -1,0 +1,878 @@
+//	https://www.youtube.com/@Kavsoft/search?query=core%20data
+
+/*
+
+https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=true&price_change_percentage=24h
+*/
+///////////////////////////////// Core => View + View Model
+
+/// PortfolioDataService
+class PortfolioDataService{
+	private let container: NSPersistentContainer
+	private let containerName : String = "PortfolioContainer"
+	private let entityName: String = "PortforlioEntity"
+	
+	@Published var savedEntites : [PortfolioEntity] = [] 
+	
+	init(){
+	
+		container = NSPersistentContainer(name: containterName)
+		container.loadPersistentStores { (_, error) in
+		
+			if let error = error {
+				print("Error loading coredata \(error)")
+			}
+			
+			self.getPortforlio()
+		
+		}
+	}
+	
+	func updatePortforlio(coin:Model, amount: Double){
+		if let entity = savedEntites.first(where: { (savedEntity) -> Bool in 
+			return savedEntity.coinID == coin.id
+		
+		}){
+			if amount > 0 {
+				update(entity: entity, amount: amount)
+			}
+			else{
+				delete(entity: entity)
+			}
+		}
+		else{
+			add(coin: coin, amount: amount)
+		}
+	}
+	
+	private func getPortforlio(){
+		let request = NSFetchRequest<PortfolioEntity>(entityName: entityName )
+		do{
+			entities = try container.viewContext.fetch(request)
+		}catch let error{
+			print("Error fetching porfolio entity \(error)")
+		}
+	}
+	
+	private func add(coin: CoinModel, amount: Double){
+		let entity = PortforlioEntity(context: container.viewContext)
+		entity.coinID = coin.id
+		entity.amount = amount
+		applyChanges()
+		
+	}
+	
+	private func update(entity: PortforlioEntity, amount: Double){
+		entity.amount  = amount
+		applyChanges()
+	}
+	
+	pirvate func remove(entity: PortforlioEntity){
+		container.viewContext.delete(entity)
+		applyChanges()
+	}
+	
+	private func save(){
+		do{
+			try container.viewContext.save()
+
+		}catch let error{
+			print(error)
+		}
+	}
+	
+	private func applyChanges(){
+		save()
+		getPortforlio()
+	}
+}
+
+/// MarketDataService
+class MarketDataService{
+	@Published var marketData: MarketDataModel? = ni
+	
+	//var cancellables = Set<AnyCancellable>()
+	var marketDataSubscription: AnyCancellable?
+
+	init(){
+		getData()
+	}
+	
+	private func getData(){
+		guard let url = URL(string:"") else { return } 
+		marketDataSubscription = NetworkingManager.download(url: url)
+			.decode(type: GlobalData.self, decoder: JSONDecoder())
+			.sink(receiveCompletion: NetworkManager.handleCompletion, receiveValue: { [weak self] (returnedGlobalData) in
+				self?.marketData = returnedGlobalData.data
+				self?.marketDataSubscription?.cancel()
+			}
+			//.store(in: &cancellables)
+	}
+}
+
+
+/// NetworkingManager
+class NetworkingManager{
+
+	enum NetworkingError: LocalizedError{
+		case badURLResponse(url: URL)
+		case unknown
+		
+		var errorDescription: String?{
+			switch self{
+			case .badURLResposne(url: let url): return "Bad response from URL. \(url)"
+			case .unknown: return "Unknown error occured"
+			}
+		}
+	}
+
+	static func download(url: URL)-> AnyPublisher<Data, Error>{
+		return URLSession.shared.dataTaskPublisher(for: url)
+				.subscribe(on: DispatchQueue.global(qos: .default))
+			.tryMap({ try handleURLResponse(output: $0, url: url) })
+			.receive(on: DispatchQueue.main)
+			.eraseToAnyPublisher()
+	}
+	
+	static func handleCompletion(completion: Subscribers.Completion<Error>){
+		switch compeltion {
+		case .finished: 
+			break
+		case .failure(let error):
+			print(error)
+		}
+	}
+	
+	static func handleURLResponse(output: URLSession.DataTaskPublisher.Output, url: URL) throws -> Data{
+		guard let response = output.response as? HTTPURLResponse,
+					response.statusCode >= 200 && response.statusCode < 300 else{
+						throw NetWorkingError.badURLReponse(url: url )
+					}
+					
+					return output.data
+	}
+	
+}
+
+/// Services
+class CoinDataService{
+	@Published var allCoins: [CoinModel] = []
+	
+	//var cancellables = Set<AnyCancellable>()
+	var coinSubscription: AnyCancellable?
+
+	init(){
+		getCoins()
+	}
+	
+	private func getCoins(){
+		guard let url = URL(string:"") else { return } 
+		coinScuscription = NetworkingManager.download(url: url)
+			.decode(type: [CoinModel].self, decoder: JSONDecoder())
+			.sink(receiveCompletion: NetworkManager.handleCompletion, receiveValue: { [weak self] (returnedCoins) in
+				self?.allCoins = returnedCoins
+				self?.coinSubscription?.cancel()
+			}
+			//.store(in: &cancellables)
+	}
+}
+
+
+/// ViewModel
+class HomeViewModel: ObservableObject{
+
+	@Published var statistics: [StatisticsModel] = []
+	@Published var allCoins : [CoinModel] = []
+	@Published var portforlioCoins: [CoinModel] = []
+	@Published var searchText: String = "" 
+	
+	private let dataService = CoinDataService()
+	private let marketDataServie = MarketDataService()
+	private let protforlioDataService = PortForlioDataService()
+	private var cancellables = Set<AnyCancellable>()
+	
+	init(){
+		addSubscribers
+	}
+	
+
+	
+	func addSubscribers(){
+		/*
+		// 	dataService.$allCoins
+			.sink{ [weak self] (returnCoined) in 
+				self?.allCoins = returnedCoins
+			}
+			.store(in: &cancellables)
+		*/
+		
+		marketDataService.$marketData
+			.map (mapGlobalMarketData)
+			.sink{ [weak self] (returnedStats) in
+				self?.stattics = returnedStats
+			
+			}
+			.store(in: &cancellables)
+			
+		$searchText
+			.combineLatest(dataService.$allCoins)
+			.debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
+			.map(filterCoins)
+			.sink{ [weak self] (returnedCoins) in 
+				self.allCoins = returnedCoins
+			
+			}
+			.store(in: &cancellables)
+			
+		
+			
+		
+	}
+	
+	private func filterCoins(text:String, coins: [CoinModel]) -> [CoinModel] {
+		guard !text.isEmpty else{
+					return coins
+				}
+				
+		let lowercasedText = text.lowercased()
+		return coins.filter { (coin) -> Bool
+			return coin.name.lowercased().contains(lowercasedText) || coin.symbol.lowercased().contains(lowercasedText) ||
+					coin.id.lowercased().contains(lowercasedText)
+				
+		}
+	}
+	
+	private func mapGlobalMarketData(data: MarketData?) -> [StatisticModel]{
+	
+		var stats: [StatisticModel] = []
+				guard let data = marketDataModel else {
+					return stats	
+				}			
+		let marketCap = StatisticModel(title: "Market Cap", value: data.marketCap, percentageChange: data.marketChangePercentage)
+				
+		let volume = StatisticModel(title: "24h Volume", value data.valume)
+		let portforlio = StatisticModel(title: "Portfolio", value data.valume)
+		stats.appends(contentsOf: [
+			marketCap,
+			volume,
+			portforlio
+		])
+				
+		return stats
+	}
+}
+
+
+/// Home
+
+struct HomeView: View{
+
+	@EnvironmentObject private var vm: HomeViewModel
+	
+	@State private var showPortforlio: Bool = false
+
+	var body: some View{
+		// background layer
+		Color.theme.background
+			.ignoresSafeArea()
+			
+		// content layer
+		VStack{
+			homeHeader
+			
+			SearchBarView(searchText: $vm.searchText)
+			
+			if !showPortforlio{
+				allCoinList
+				.transition(.move(edge: .leading))
+			}
+			else{
+				portforlioCoinList
+				.transition(.move(edge: .trailing))
+			}
+			
+			
+			Spacer(minLength: 0)
+			
+		}
+			
+	}
+}
+
+extension HomeView{
+	private var homeHeader: some View{
+		HStack{
+				CircleButtonView(iconName: showPortforlio ? "plus" : "info")
+					.animation(.none)
+					.background(
+						CircleButtonAnimationView(animate: $showPortforlio)
+					)
+				Spacer()
+				Text(showPortforlio  ? "Portforlio" : "Live Prices")
+					.font(.headline)
+					.fontWeight(.heavy)
+					.foregroundColor(Color.theme.accent)
+					.animation(.none)
+				Spacer()
+				CircleButtonView(iconName: "chevron.right")
+					.rotationEffect(Angle(degrees: showPortforlio ? 180 : 0 ))
+					.onTapGesture{
+						withAnimation(.spring()){
+							showPortfolio.toggle()
+						}
+					}
+			}
+			.padding(.horizontal)
+	}
+	
+	
+	private var allCoinList: some View{
+		List {
+				ForEach(vm.allCoins){ coin in 
+						CoinRowView(coin: coin, showHoldingsColumn: false)
+						.listRowInsets(.init(
+							top: 10,
+							leading: 0,
+							bottom: 10,
+							trailing: 10
+						))
+					}
+				}
+				.listStyle(PlainListStyle())
+	}
+	
+	private var portforlioCoinList: some View{
+		List {
+				ForEach(vm.allCoins){ coin in 
+						CoinRowView(coin: coin, showHoldingsColumn: true)
+						.listRowInsets(.init(
+							top: 10,
+							leading: 0,
+							bottom: 10,
+							trailing: 10
+						))
+					}
+				}
+				.listStyle(PlainListStyle())
+	}
+	
+	private var columnTitles: some View{
+		HStack{
+				Text("Coin")
+				Spacer()
+				if showPortForlio{
+					Text("Holdings")
+				}
+				
+				Text("Price")
+					.frame(width: UIScreen.main.bounds.width / 3.5, alignment: .trailing) 
+			}
+			.font(.caption)
+			.foregroundColor(Color.theme.secondaryText)
+			.padding(.horizontal)
+	}
+}
+
+
+/// MainView
+@main
+struct SwiftfulCryptoApp: App{
+
+	@StateObject private var vm = HomeViewModel()
+	
+	var body : some Scene{
+		WindowGroup{
+			NavigationView{
+				HomeView()
+					.navigationBarHidden(true)
+			}
+		}
+		.environmentObject(vm)
+	}
+}
+
+// SearchBarView
+struct SearchBarView: View{
+
+
+	@Binding var searchText: String 
+	var body: some View {
+		Hstack {
+			Image(systemName: "magnifyingglass")
+				.foregroundColor(
+					searchText.isEmpty ? Color.theme.secondaryText : Color.theme.accent
+				
+				)
+				
+			TextField("Search by name or symbol..." , t text : $searchText)
+				.foreground(Color.theme.accent)
+				.overlay(
+					Image(systemName: "xmark.circle.fill")
+						.padding()
+						.offset(x:10)
+						.foregroundColor*Color.theme.accent)
+						.opacity(searchText.isEmpty ? 0.0 : 1.0)
+						.onTapGesture {
+							UIApplication.shared.endEditing()
+							searchText = ""
+						}
+					, alignment: .trailing
+				)
+		
+		}
+		.font(.headline)
+		.padding()
+		.background(
+			RoundedRectangle(cornerRadius: 25)
+				.fill(Color.theme.background)
+				.shadow(
+					color: Color.theme.accent.opacity(0.15),
+					radius: 10, x: 0, y: 0
+				)
+				
+				
+		)
+	}
+}
+
+struct SearchBarView_Previews: PreviewProvider{
+	static var previews: some View{
+		Group{
+			SearchBarView(searchText: .constant(""))
+				.previewLayout(.sizeThatFits)
+				.preferredColorScehme(.light)
+				
+			SearchBarView(searchText: .constant(""))
+				.previewLayout(.sizeThatFits)
+				.preferredColorScheme(.dark)
+		}
+		
+	}
+}
+
+// Extension UIApplication for keyboard
+extension UIApplication {
+	func endEditing(){
+		sendAction(#selector(UIResponder.registerFirstResponder) , to: nil, from: nil, for: nil)
+	}
+}
+
+// CoinImageService
+class CoinImageService{
+	
+	@Published var image: UIImage? = nil
+	
+	private var imageSubscription: AnyCancellable?
+	private let coin: CoinModel
+	
+	private let fileManager = LocalFileManager.instance
+	private let folderName = "coin_images"
+	private let imageName: String
+
+	init(coin: CoinModel){
+		self.coin = coin
+		self.imageName = coin.id
+		getCoinImage()
+		
+	}
+	
+	private func getCoinImage(){
+		if let saveImage = fileManager.getImage(imageName: imageName, folderName: folderName){
+			image = saveImage
+			print("Retrieved image for file manager")
+		} else {
+			downloadCoinImage()
+			print("Downloading image now")
+		}
+	}
+	
+	private func downloadCoinImage(){
+	
+		guard let url = URL(string: coin.image) else { return } 
+		imageSubscription = NetworkingManager.download(url: url)
+			.tryMap({ (data) -> UIImage? in
+				return UIImage(data: data)
+			})
+			.sink(receiveCompletion: NetworkManager.handleCompletion, receiveValue: { [weak self] (returnedImage) in
+				guard 
+					let self = self,
+					let downloadImage = returnedImage
+				else { return } 
+				
+				self.image = downloadImage
+				self.imageSubscription?.cancel()
+				
+				
+				self.fileManager.saveImage(
+					image: downloadImage,
+					imageName: self.imageName,
+					folderName: self.folderName 
+				)
+			}
+	}
+}
+
+// CoinImageViewModel
+
+class CoinImageViewModel: ObservableObject{
+	@Published var image: UIImage? = nil
+	@Published var isLoading: Bool = false
+	
+	
+	private let coin: CoinModel
+	private let dataService: CoinImageService
+	private var cancellables = Set<AnyCancellable>()
+	
+	
+	init(coin: CoinModel){
+		self.coin = coin
+		self.dataService = CoinImageSerivice(coin: coin)
+		addSubscribers()
+	}
+	
+	private func addSubscribers(){
+		dataService.$image
+			.sink{ [weak self] (_) in 
+				self?.isLoading = false 
+			} receiveValue: { (image) in 
+				self?.iamge = image
+			}
+			.store(in: &cancellables)
+	}
+}
+
+// LocalFileManager
+class LocalFileManager {
+	static let instance = LocalFileManager()
+	
+	private init(){}
+	
+	func saveImage(image: UIImage, imageName: String, folderName: String){
+		// create folder
+		createFolderNameIfNeeded(folderName: folderName)
+
+		// get path for image
+		guard
+			let data = image.pngData(),
+			let url = getURLForImage(imageName: imageName, folderName: folderName)
+		else { return } 
+		
+		// save image to path
+		do{
+			try data.write(to: url)
+		}catch let error {
+			print("Error saving image. \(error)")
+		}
+	}
+	
+	func getImage(imageName: String, folderName: String) -> UIImage? {
+		guard 
+			let url =  getURLForImage(imageName: imageName, folderName: folderName),
+			FileManager.default.fileExists(atPath: url.path 
+		else { return nil }
+		
+		return UIImage(contentsOfFile: url.path)
+	}
+	
+	private func createFolderIfNeeded(folderName: String){
+		guard let url = getURLForFolder(folderName: folderName) else { return } 
+		if !FileManger.default.fileExists(atPath: url.path) {	
+			do{
+				try FileManager.default.createDirectory(at: url, withIntermediateDirectiories: true, attributes: ni)
+			}catch let error{
+				print(error)
+			}
+		}
+	}
+	
+	
+	private func getURLForFolder(folderName: String) -> URL? {
+		guard let url = FileManger.default.urls(for: .cacheDirectory, in: .userDomainMask).first else { return nil } 
+	
+	
+		return url.appendingPathComponent(name)
+		
+	}
+	
+	private func getURLForImage(imageName: String, folderName: String) -> URL? {
+		guard let folderURL = getURLForFolder(folderName: folderName) else {
+			return nil 
+		}
+		return folderURL.appendingPathComponent(imageName + ".png")
+	}
+}
+
+// Components
+struct CoinImageView: View {
+	
+	@StateObject var vm: CoinImageViewModel 
+	
+	init(coin: CoinModel){
+		_vm = StateObject(wrappedValue: CoinImageViewModel(coin: coin)) 
+	}
+
+	var body: some View{
+		if let image = vm.image{
+			Image(uiImage: image)
+				.resizable()
+				.scaledToFit()
+		}
+		else if vm.isLoading{
+			ProgressView()
+		}
+		else{
+			Image(systemName: "questionmark")
+				.foregroundColor(Color.theme.secondaryText)
+		}
+	}
+}
+
+//CoinRowVeiw
+struct CoinRowVeiw: View{
+	
+	let coin: CoinModel
+	let showHoldingsColumn : Bool	
+	
+	var body: some View{
+		HStack(spaciing: 0 ) {
+			leffColumn		
+			Spacer()
+			
+			if showHoldingsColumn{
+				centerColumn
+			}
+			
+			rightColumn
+			
+				
+		}
+		.font(.subheadline)
+	}
+	
+}	
+
+extension CoinRowView{
+	private var leftColumn: some View{
+		HStack(spacing: 0) {
+			Text("\(coin.rank)")
+				.font(.caption)
+				.foregroundColor(Color.theme.secondaryText)
+				.frame(minWidth: 30)
+			Circle()
+					.frame(width: 30, height: 30)		
+			Text(coin.symbol.uppercased())
+					.font(.headline)
+					.padding(.leading, 6)
+					.foregroundColor(Color.theme.accent)
+			
+		}	
+			
+			
+	}
+	
+	private var centerColumn: some View{
+		VStack(alignmet: .trailing){
+					Text(coin.currentHoldingsValue.asCurrencyWith6Decimals())
+						.bold()
+					Text((coin.currentHoldings  ?? 0).asNumberString() )
+				}
+				.foregroundColor(Color.theme.accent)
+			
+	}
+	
+	private var rightColumn: some View{
+		VStack(alignmet: .trailing){
+				Text("\(coin.crrentPrice.asCurrencyWith6Decimals())")
+					.bold()
+					.foregroundColor(Color.theme.accent)
+				Text("\(coin.priceChangePercentage24H ?? 0)%")
+					.foregroundColor(
+						(coin.priceChangePercentage24H.asPercentString() ?? 0 ) >= 0 ? Color.theme.green : Color.theme.red
+					)
+			}
+			.frame(width: UIScreen.main.bounds.width / 3.5, alignment: .trailing )	
+	}
+}
+
+struct CoinRowView_Previews: PreviewProvider{
+	static var previews: some View{
+		Group{
+			CoinRowView(coin: dev.coin, showHoldingsColumn: true)
+				.previewLayout(.sizeThatFits)
+				CoinRowView(coin: dev.coin, showHoldingsColumn: true)
+				.previewLayout(.sizeThatFits)
+				.preferredColorScheme(.dark)
+		}
+	}
+}
+
+
+// Circle Button View
+struct CircleButtonView: View{
+	
+	let iconName: String	
+	
+	var body: some View{
+		Image(systemName: iconName)
+			.font(.headline)
+			.foregroundColor(Color.theme.accent)
+			.frame(width: 50, height: 50)
+			.background(
+				Circle()
+					.foregroundColor(Color.theme.background)
+			)
+			.shadow(
+				color: Color.theme.accent.opacity(0.25),
+				radius: 10, x: 0, y:0
+			)
+			.padding()
+	}
+	
+}
+
+// Circle Button Animation View
+struct CircleButtonAnimation: View{
+
+	@Binding var animate : Bool
+
+	var body: some View{
+		Circle()
+			.stroke(lineWidth: 5.0)
+			.scale(animate ? 1.0 : 0.0)
+			.opacity(animate ? 0.0 : 1.0)
+			.animation(animate ? Animation.easeOut(duration : 1.0) : .none)
+			//.onAppear {
+			//	animate.toggle()
+			//}
+	}
+	
+}
+
+
+///////////////////////////////// Extensions
+extension Color {
+	static let theme = ColorTheme()
+}
+
+extension Double {
+	// Converts a Double into a Currency with 2-6 decimal places
+	/// ...
+	/// Convert 1234.56 to $1,234.56
+	/// Convert 12.3456 to $12.3456
+	/// Convert 0.188888855 to $0.1888888
+	/// ...
+	private var currencyFormatter6 : NumberFormatter{
+		let formatter = NumberFormatter()
+		formatter.usesGroupingSeperator = true
+		formatter.numberStyle = .currency
+		//formatter.locale = .current // <- default value
+		//formatter.currencyCode = "usd" // <- change currency
+		//formatter.currenSymbol = "$" // <- change currency symbol
+		formatter.minimumFractionDigits = 2 
+		formatter.maximumFractionDigits = 6
+		return formatter
+	}
+	
+	// Converts a Double into a Currency with 2-6 decimal places
+	/// ...
+	/// Convert 1234.56 to $1,234.56
+	/// Convert 12.3456 to $12.3456
+	/// Convert 0.188888855 to $0.1888888
+	/// ...
+	func asCurrenWith6Decimals() -> String{
+		let number = NSNumber(value: self)
+		return currenFormatter6.string(from: number) ?? "$0.00"
+	}
+	
+	
+	// Converts a Double into string representation
+	/// ...
+	/// Convert 1.2345 to "1.23"
+	/// ...
+	func asNubmerString() -> String{
+		return String(format: "%.2f", self)
+	}
+	
+	// Converts a Double into string representation with percent symbol
+	/// ...
+	/// Convert 1.2345 to "1.23%"
+	/// ...
+	func asPercentString() -> String{
+		return asNumberString() + "%"
+	}
+}
+
+struct ColorTheme{
+	let accent = Color( "AccentColor")
+	let background =  Color( "BackgroundColor")
+	let green = Color("GreenColor")
+	let red = Color("RedColor")
+	let secondaryText = Color("SecondaryTextColor")
+}
+
+
+///////////////////////////////// Model
+// CoinModel
+struct CoinModel : Identifiable, Codable {
+    let id, symbol, name: String?
+    let image: String?
+    let currentPrice: Double?
+    let marketCap, marketCapRank: Double?
+    let fullyDilutedValuation: Double?
+    let totalVolume, high24H, low24H, priceChange24H: Double?
+    let priceChangePercentage24H, marketCapChange24H, marketCapChangePercentage24H, circulatingSupply: Double?
+    let totalSupply, maxSupply: Double?
+    let ath, athChangePercentage: Double?
+    let athDate: String?
+    let atl, atlChangePercentage: Double?
+    let atlDate: String?
+    let lastUpdated: String?
+    let sparklineIn7D: SparklineIn7D?
+    let priceChangePercentage24HInCurrency: Double?
+    let currentHoldings: Double?
+    
+       enum CodingKeys: String, CodingKey {
+        case id, symbol, name, image
+        case currentPrice = "current_price"
+        case marketCap = "market_cap"
+        case marketCapRank = "market_cap_rank"
+        case fullyDilutedValuation = "fully_diluted_valuation"
+        case totalVolume = "total_volume"
+        case high24H = "high_24h"
+        case low24H = "low_24h"
+        case priceChange24H = "price_change_24h"
+        case priceChangePercentage24H = "price_change_percentage_24h"
+        case marketCapChange24H = "market_cap_change_24h"
+        case marketCapChangePercentage24H = "market_cap_change_percentage_24h"
+        case circulatingSupply = "circulating_supply"
+        case totalSupply = "total_supply"
+        case maxSupply = "max_supply"
+        case ath
+        case athChangePercentage = "ath_change_percentage"
+        case athDate = "ath_date"
+        case atl
+        case atlChangePercentage = "atl_change_percentage"
+        case atlDate = "atl_date"
+        case roi
+        case lastUpdated = "last_updated"
+        case sparklineIn7D = "sparkline_in_7d"
+        case priceChangePercentage24HInCurrency = "price_change_percentage_24h_in_currency"
+        case currentHoldings
+    }
+    
+    func updateHoldings(amount: Double) -> CoinModel{
+    	//return CoinModel(id: id,....., currentHoldings: amount)
+    }
+    
+    var currentHoldingsValue: Double{
+    	return (currentHoldings ?? 0) * currentPrice
+    }
+    
+    var rank: Int {
+    	return Int(marketCapRank ?? 0)
+    }
+}
+
+struct SparklineIn7D : Codable{
+    let price: [Double]?
+}
